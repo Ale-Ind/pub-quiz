@@ -29,20 +29,23 @@ function decodeHTML(html) {
                .replace(/&rdquo;/g, '"');
 }
 
-// Funzione di traduzione automatica gratuita (Inglese ➔ Italiano)
+// Funzione di traduzione automatica GRATUITA e SENZA LIMITI con Google Translate
 async function translateText(text) {
-    if (!text) return "";
+    if (!text || text.trim() === "") return "";
     try {
-        const url = `https://api.mymemory.translated.net/get?q=${encodeURIComponent(text)}&langpair=en|it`;
+        const url = `https://translate.googleapis.com/translate_a/single?client=gtx&sl=en&tl=it&dt=t&q=${encodeURIComponent(text)}`;
         const res = await fetch(url);
         const data = await res.json();
-        if (data && data.responseData && data.responseData.translatedText) {
-            return decodeHTML(data.responseData.translatedText);
+        
+        // Google Translate restituisce la traduzione in un array strutturato
+        if (data && data[0]) {
+            let translated = data[0].map(item => item[0]).join('');
+            return decodeHTML(translated);
         }
     } catch (e) {
-        console.error("Errore di traduzione:", e);
+        console.error("Errore di traduzione con Google Translate:", e);
     }
-    return text; // Fallback al testo originale se la rete fallisce
+    return text; // Fallback al testo originale in caso di errore di rete
 }
 
 // Scarica le domande in inglese e le traduce in italiano
