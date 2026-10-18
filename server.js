@@ -33,14 +33,12 @@ function decodeHTML(html) {
 
 const delay = ms => new Promise(resolve => setTimeout(resolve, ms));
 
-// Traduzione di una singola stringa protetta da micro-pausa
 async function translateText(text) {
     if (!text || text.trim() === "") return "";
     let cleanText = decodeHTML(text);
 
     try {
-        await delay(200); // Micro-pausa invisibile
-
+        await delay(200);
         const url = `https://translate.googleapis.com/translate_a/single?client=gtx&sl=en&tl=it&dt=t&q=${encodeURIComponent(cleanText)}`;
         const res = await fetch(url, {
             headers: {
@@ -63,7 +61,6 @@ async function translateText(text) {
     return cleanText;
 }
 
-// Scarica le domande in inglese in modo istantaneo all'avvio
 async function fetchRawQuestions() {
     console.log("🔄 Scaricamento rapido domande grezze...");
     isReadyToStart = false;
@@ -102,11 +99,11 @@ async function fetchRawQuestions() {
                 loadedQuestions.push({
                     id: i + 1,
                     categoryEn: rawCategoryEn,
-                    categoryIt: null, // Verrà tradotto al volo
+                    categoryIt: null,
                     questionEn: rawQuestionEn,
-                    questionIt: null, // Verrà tradotto al volo
+                    questionIt: null,
                     optionsEn: optionsEn,
-                    optionsIt: null,  // Verrà tradotto al volo
+                    optionsIt: null,
                     correct: finalCorrectKey,
                     translated: false
                 });
@@ -114,7 +111,7 @@ async function fetchRawQuestions() {
 
             questions = loadedQuestions;
             isReadyToStart = true;
-            console.log(`✅ ${questions.length} domande pronte in memoria (pronte per la traduzione on-demand)!`);
+            console.log(`✅ ${questions.length} domande pronte in memoria!`);
             io.emit('loading_status', "");
             io.emit('update_state', getGameStatePayload());
         }
@@ -126,13 +123,11 @@ async function fetchRawQuestions() {
 
 fetchRawQuestions();
 
-// Funzione che traduce una domanda SOLO quando viene richiesta dal gioco
 async function ensureQuestionTranslated(index) {
     let q = questions[index];
-    if (q.translated) return; // Se è già tradotta, salta
+    if (q.translated) return;
 
     console.log(`🌐 Traduzione on-demand della domanda ${index + 1}...`);
-    
     q.categoryIt = await translateText(q.categoryEn);
     q.questionIt = await translateText(q.questionEn);
 
@@ -207,6 +202,7 @@ io.on('connection', (socket) => {
             delay: relativeTime
         });
 
+        // Al primo click si apre la fase di risposta per il primo in coda
         if (buzzerQueue.length === 1) {
             gameState = 'ANSWERING';
             currentAnsweringIndex = 0;
@@ -224,16 +220,15 @@ io.on('connection', (socket) => {
         const currentQ = questions[currentQuestionIndex];
 
         if (chosenOption === currentQ.correct) {
-            let pointsAwarded = (currentAnsweringIndex === 0) ? 1.0 : 0.5;
+            // Chiunque indovina prende sempre 1 punto pieno
             let teamObj = teams.find(t => t.id === socket.id);
-            if (teamObj) teamObj.score += pointsAwarded;
+            if (teamObj) teamObj.score += 1.0;
 
             gameState = 'QUESTION_ENDED';
             io.emit('answer_result', {
                 correct: true,
                 teamName: teamObj ? teamObj.name : '',
-                points: pointsAwarded,
-                correctOption: currentQ.correct
+                points: 1.0
             });
             io.emit('update_teams', teams);
             io.emit('update_state', getGameStatePayload());
@@ -242,21 +237,23 @@ io.on('connection', (socket) => {
         } else {
             eliminatedOptions.push(chosenOption);
 
-            if (currentAnsweringIndex === 0 && buzzerQueue.length > 1) {
-                currentAnsweringIndex = 1;
+            // C'è un'altra squadra successiva in coda? Passa il turno a lei!
+            if (currentAnsweringIndex + 1 < buzzerQueue.length) {
+                currentAnsweringIndex++;
+                const nextTeam = buzzerQueue[currentAnsweringIndex];
                 io.emit('answer_result', {
                     correct: false,
                     teamName: currentTeamInQueue.teamName,
-                    message: "Risposta errata! Opzione eliminata. Turno alla seconda squadra!"
+                    message: `Risposta errata! Turno a ${nextTeam.teamName}.`
                 });
                 io.emit('update_state', getGameStatePayload());
             } else {
+                // Nessun'altra squadra in coda: la domanda si chiude senza mostrare la risposta
                 gameState = 'QUESTION_ENDED';
                 io.emit('answer_result', {
                     correct: false,
                     teamName: currentTeamInQueue.teamName,
-                    message: "Tentativi esauriti! Nessun punto assegnato.",
-                    correctOption: currentQ.correct
+                    message: "Tentativi esauriti per tutte le squadre in coda! Nessun punto."
                 });
                 io.emit('update_state', getGameStatePayload());
 
@@ -272,11 +269,8 @@ io.on('connection', (socket) => {
     });
 });
 
-// Apre la domanda traducendola al volo se necessario
 async function startQuestion() {
     if (autoNextTimer) clearTimeout(autoNextTimer);
-    
-    // Traduce la domanda corrente prima di aprirla
     await ensureQuestionTranslated(currentQuestionIndex);
 
     gameState = 'QUESTION_OPEN';
