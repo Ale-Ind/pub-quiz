@@ -16,7 +16,8 @@ let gameState = 'LOBBY';
 let buzzerQueue = [];
 let currentAnsweringIndex = 0;
 let eliminatedOptions = [];
-let isReadyToStart = false; // Flag per indicare se le domande sono pronte
+let isReadyToStart = false;
+let autoNextTimer = null; // Memorizza il timer per eventuale pulizia
 
 function decodeHTML(html) {
     return html.replace(/&quot;/g, '"')
@@ -149,17 +150,8 @@ io.on('connection', (socket) => {
         startQuestion();
     });
 
-    socket.on('next_question', () => {
-        currentQuestionIndex++;
-        if (currentQuestionIndex < questions.length) {
-            startQuestion();
-        } else {
-            gameState = 'GAME_OVER';
-            io.emit('game_over', { teams });
-        }
-    });
-
     socket.on('reset_game', () => {
+        if (autoNextTimer) clearTimeout(autoNextTimer);
         gameState = 'LOBBY';
         currentQuestionIndex = -1;
         buzzerQueue = [];
@@ -218,6 +210,8 @@ io.on('connection', (socket) => {
             });
             io.emit('update_teams', teams);
             io.emit('update_state', getGameStatePayload());
+
+            scheduleNextQuestion();
         } else {
             eliminatedOptions.push(chosenOption);
 
@@ -238,6 +232,8 @@ io.on('connection', (socket) => {
                     correctOption: currentQ.correct
                 });
                 io.emit('update_state', getGameStatePayload());
+
+                scheduleNextQuestion();
             }
         }
     });
@@ -250,11 +246,27 @@ io.on('connection', (socket) => {
 });
 
 function startQuestion() {
+    if (autoNextTimer) clearTimeout(autoNextTimer);
     gameState = 'QUESTION_OPEN';
     buzzerQueue = [];
     currentAnsweringIndex = 0;
     eliminatedOptions = [];
     io.emit('update_state', getGameStatePayload());
+}
+
+function scheduleNextQuestion() {
+    if (autoNextTimer) clearTimeout(autoNextTimer);
+    
+    // Timer di 5 secondi prima di avanzare automaticamente
+    autoNextTimer = setTimeout(() => {
+        currentQuestionIndex++;
+        if (currentQuestionIndex < questions.length) {
+            startQuestion();
+        } else {
+            gameState = 'GAME_OVER';
+            io.emit('game_over', { teams });
+        }
+    }, 5000);
 }
 
 function getGameStatePayload() {
