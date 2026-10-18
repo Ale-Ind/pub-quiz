@@ -10,14 +10,14 @@ const io = new Server(server);
 app.use(express.static(path.join(__dirname, 'public')));
 
 let questions = [];
-let teams = []; // { id, name, score }
+let teams = [];
 let currentQuestionIndex = -1;
-let gameState = 'LOBBY'; // LOBBY, QUESTION_OPEN, ANSWERING, QUESTION_ENDED, GAME_OVER
-let buzzerQueue = []; // [{ socketId, teamName, timestamp, delay }]
+let gameState = 'LOBBY';
+let buzzerQueue = [];
 let currentAnsweringIndex = 0;
 let eliminatedOptions = [];
+let isReadyToStart = false; // Flag per indicare se le domande sono pronte
 
-// Funzione per decodificare caratteri HTML speciali
 function decodeHTML(html) {
     return html.replace(/&quot;/g, '"')
                .replace(/&#039;/g, "'")
@@ -29,7 +29,6 @@ function decodeHTML(html) {
                .replace(/&rdquo;/g, '"');
 }
 
-// Funzione di traduzione automatica GRATUITA e ILLIMITATA con Google Translate
 async function translateText(text) {
     if (!text || text.trim() === "") return "";
     try {
@@ -47,9 +46,11 @@ async function translateText(text) {
     return text;
 }
 
-// Scarica le domande in inglese e le traduce in italiano
 async function fetchAndTranslateQuestions() {
     console.log("Scaricamento e traduzione delle domande in corso...");
+    isReadyToStart = false;
+    io.emit('loading_status', "Scaricamento e traduzione domande in corso... Attendere.");
+
     try {
         const response = await fetch('https://opentdb.com/api.php?amount=30&type=multiple');
         const data = await response.json();
@@ -102,10 +103,14 @@ async function fetchAndTranslateQuestions() {
             }
 
             questions = loadedQuestions;
+            isReadyToStart = true;
             console.log(`✅ Tradotte e caricate con successo ${questions.length} domande!`);
+            io.emit('loading_status', "");
+            io.emit('update_state', getGameStatePayload());
         }
     } catch (err) {
         console.error("Errore nel recupero delle domande:", err);
+        io.emit('loading_status', "Errore di caricamento domande. Ricarica la pagina.");
     }
 }
 
@@ -120,7 +125,8 @@ io.on('connection', (socket) => {
         currentQuestion: currentQuestionIndex >= 0 ? questions[currentQuestionIndex] : null,
         buzzerQueue,
         currentAnsweringIndex,
-        eliminatedOptions
+        eliminatedOptions,
+        isReadyToStart
     });
 
     socket.on('register_team', (teamName) => {
@@ -134,10 +140,11 @@ io.on('connection', (socket) => {
         teams.push({ id: socket.id, name: teamName.trim(), score: 0 });
         socket.emit('registration_success', teamName.trim());
         io.emit('update_teams', teams);
+        io.emit('update_state', getGameStatePayload());
     });
 
     socket.on('start_game', () => {
-        if (teams.length === 0 || questions.length === 0) return;
+        if (!isReadyToStart || teams.length === 0 || questions.length === 0) return;
         currentQuestionIndex = 0;
         startQuestion();
     });
@@ -238,6 +245,7 @@ io.on('connection', (socket) => {
     socket.on('disconnect', () => {
         teams = teams.filter(t => t.id !== socket.id);
         io.emit('update_teams', teams);
+        io.emit('update_state', getGameStatePayload());
     });
 });
 
@@ -258,7 +266,8 @@ function getGameStatePayload() {
         currentAnsweringIndex,
         eliminatedOptions,
         questionNumber: currentQuestionIndex + 1,
-        totalQuestions: questions.length
+        totalQuestions: questions.length,
+        isReadyToStart
     };
 }
 
