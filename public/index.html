@@ -13,7 +13,12 @@
             <h1 class="text-3xl font-black text-amber-400">🧠 SUPER PUB QUIZ</h1>
             <p class="text-sm text-slate-400 mt-1">Collega i telefoni all'indirizzo web seguito da <code class="text-amber-300">/controller.html</code></p>
         </div>
-        <div id="game-status-badge" class="px-4 py-2 bg-blue-600 rounded-full font-bold text-sm">LOBBY</div>
+        <div class="flex items-center gap-3">
+            <button onclick="resetGame()" class="px-3 py-2 bg-rose-600 hover:bg-rose-700 text-white font-bold text-xs rounded-xl transition shadow border border-rose-500 flex items-center gap-1">
+                🛑 RESETTA PARTITA
+            </button>
+            <div id="game-status-badge" class="px-4 py-2 bg-blue-600 rounded-full font-bold text-sm">LOBBY</div>
+        </div>
     </header>
 
     <main class="flex-grow my-6 flex flex-col justify-center">
@@ -36,10 +41,7 @@
                         <span id="q-counter">Domanda 1 / 30</span>
                     </div>
                     
-                    <!-- Domanda principale in ITALIANO -->
                     <h2 id="q-text-it" class="text-2xl md:text-3xl font-bold mb-2 leading-snug text-white">Domanda in italiano...</h2>
-                    
-                    <!-- Traduzione / Testo originale in INGLESE affiancato in piccolo -->
                     <p id="q-text-en" class="text-xs text-slate-400 italic mb-6">Original (EN): ...</p>
                 </div>
 
@@ -99,6 +101,7 @@
         const qTextEn = document.getElementById('q-text-en');
         const actionFeedback = document.getElementById('action-feedback');
         const nextQBtn = document.getElementById('next-q-btn');
+        const gameStatusBadge = document.getElementById('game-status-badge');
 
         socket.on('update_state', (state) => updateUI(state));
         socket.on('update_teams', (teams) => renderTeams(teams));
@@ -132,6 +135,12 @@
 
         function startGame() { socket.emit('start_game'); }
         function nextQuestion() { nextQBtn.classList.add('hidden'); socket.emit('next_question'); }
+        
+        function resetGame() {
+            if (confirm("Vuoi davvero interrompere la partita attuale e tornare alla Lobby?")) {
+                socket.emit('reset_game');
+            }
+        }
 
         function renderTeams(teams) {
             if (teams.length > 0) startBtn.removeAttribute('disabled');
@@ -151,11 +160,19 @@
 
         function updateUI(state) {
             renderTeams(state.teams);
+            gameStatusBadge.innerText = state.gameState;
+
             if (state.gameState === 'LOBBY') {
                 lobbyView.classList.remove('hidden');
                 gameView.classList.add('hidden');
+                gameoverView.classList.add('hidden');
+            } else if (state.gameState === 'GAME_OVER') {
+                lobbyView.classList.add('hidden');
+                gameView.classList.add('hidden');
+                gameoverView.classList.remove('hidden');
             } else {
                 lobbyView.classList.add('hidden');
+                gameoverView.classList.add('hidden');
                 gameView.classList.remove('hidden');
             }
 
