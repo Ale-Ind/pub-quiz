@@ -17,7 +17,7 @@ let buzzerQueue = []; // [{ socketId, teamName, timestamp, delay }]
 let currentAnsweringIndex = 0;
 let eliminatedOptions = [];
 
-// Funzione per decodificare caratteri HTML speciali (es. &quot; &#039;)
+// Funzione per decodificare caratteri HTML speciali
 function decodeHTML(html) {
     return html.replace(/&quot;/g, '"')
                .replace(/&#039;/g, "'")
@@ -44,14 +44,13 @@ async function translateText(text) {
     } catch (e) {
         console.error("Errore di traduzione con Google Translate:", e);
     }
-    return text; // Fallback al testo originale in caso di errore
+    return text;
 }
 
 // Scarica le domande in inglese e le traduce in italiano
 async function fetchAndTranslateQuestions() {
     console.log("Scaricamento e traduzione delle domande in corso...");
     try {
-        // Scarica 30 domande casuali dall'Open Trivia Database
         const response = await fetch('https://opentdb.com/api.php?amount=30&type=multiple');
         const data = await response.json();
         
@@ -66,11 +65,9 @@ async function fetchAndTranslateQuestions() {
                 let rawCorrectEn = decodeHTML(q.correct_answer);
                 let rawIncorrectsEn = q.incorrect_answers.map(ans => decodeHTML(ans));
 
-                // Traduce in italiano
                 let questionIt = await translateText(rawQuestionEn);
                 let categoryIt = await translateText(rawCategoryEn);
                 
-                // Unisce e mescola le opzioni (A, B, C, D)
                 let optionsEnList = [...rawIncorrectsEn, rawCorrectEn].sort(() => Math.random() - 0.5);
                 
                 let optionsEn = {};
@@ -112,7 +109,6 @@ async function fetchAndTranslateQuestions() {
     }
 }
 
-// Inizializza le domande all'avvio del server
 fetchAndTranslateQuestions();
 
 io.on('connection', (socket) => {
@@ -156,105 +152,5 @@ io.on('connection', (socket) => {
         }
     });
 
-    socket.on('press_buzzer', () => {
-        if (gameState !== 'QUESTION_OPEN') return;
-        const team = teams.find(t => t.id === socket.id);
-        if (!team) return;
-
-        if (buzzerQueue.some(b => b.socketId === socket.id)) return;
-
-        const timestamp = Date.now();
-        const relativeTime = buzzerQueue.length === 0 ? 0 : ((timestamp - buzzerQueue[0].timestamp) / 1000).toFixed(3);
-
-        buzzerQueue.push({
-            socketId: socket.id,
-            teamName: team.name,
-            timestamp: timestamp,
-            delay: relativeTime
-        });
-
-        if (buzzerQueue.length === 1) {
-            gameState = 'ANSWERING';
-            currentAnsweringIndex = 0;
-        }
-
-        io.emit('update_state', getGameStatePayload());
-    });
-
-    socket.on('submit_answer', (chosenOption) => {
-        if (gameState !== 'ANSWERING') return;
-
-        const currentTeamInQueue = buzzerQueue[currentAnsweringIndex];
-        if (!currentTeamInQueue || currentTeamInQueue.socketId !== socket.id) return;
-
-        const currentQ = questions[currentQuestionIndex];
-
-        if (chosenOption === currentQ.correct) {
-            let pointsAwarded = (currentAnsweringIndex === 0) ? 1.0 : 0.5;
-            let teamObj = teams.find(t => t.id === socket.id);
-            if (teamObj) teamObj.score += pointsAwarded;
-
-            gameState = 'QUESTION_ENDED';
-            io.emit('answer_result', {
-                correct: true,
-                teamName: teamObj ? teamObj.name : '',
-                points: pointsAwarded,
-                correctOption: currentQ.correct
-            });
-            io.emit('update_teams', teams);
-            io.emit('update_state', getGameStatePayload());
-        } else {
-            eliminatedOptions.push(chosenOption);
-
-            if (currentAnsweringIndex === 0 && buzzerQueue.length > 1) {
-                currentAnsweringIndex = 1;
-                io.emit('answer_result', {
-                    correct: false,
-                    teamName: currentTeamInQueue.teamName,
-                    message: "Risposta errata! Opzione eliminata. Turno alla seconda squadra!"
-                });
-                io.emit('update_state', getGameStatePayload());
-            } else {
-                gameState = 'QUESTION_ENDED';
-                io.emit('answer_result', {
-                    correct: false,
-                    teamName: currentTeamInQueue.teamName,
-                    message: "Tentativi esauriti! Nessun punto assegnato.",
-                    correctOption: currentQ.correct
-                });
-                io.emit('update_state', getGameStatePayload());
-            }
-        }
-    });
-
-    socket.on('disconnect', () => {
-        teams = teams.filter(t => t.id !== socket.id);
-        io.emit('update_teams', teams);
-    });
-});
-
-function startQuestion() {
-    gameState = 'QUESTION_OPEN';
-    buzzerQueue = [];
-    currentAnsweringIndex = 0;
-    eliminatedOptions = [];
-    io.emit('update_state', getGameStatePayload());
-}
-
-function getGameStatePayload() {
-    return {
-        gameState,
-        teams,
-        currentQuestion: currentQuestionIndex >= 0 ? questions[currentQuestionIndex] : null,
-        buzzerQueue,
-        currentAnsweringIndex,
-        eliminatedOptions,
-        questionNumber: currentQuestionIndex + 1,
-        totalQuestions: questions.length
-    };
-}
-
-const PORT = process.env.PORT || 3000;
-server.listen(PORT, () => {
-    console.log(`Server avviato sulla porta ${PORT}`);
-});
+    // NUOVO: reset/interruzione partita
+    socket.on('reset_game', () =>
