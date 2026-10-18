@@ -14,7 +14,7 @@
             <p class="text-sm text-slate-400 mt-1">Collega i telefoni all'indirizzo web seguito da <code class="text-amber-300">/controller.html</code></p>
         </div>
         <div class="flex items-center gap-3">
-            <button onclick="resetGame()" class="px-3 py-2 bg-rose-600 hover:bg-rose-700 text-white font-bold text-xs rounded-xl transition shadow border border-rose-500 flex items-center gap-1">
+            <button onclick="resetGame()" class="px-3 py-2 bg-rose-600 hover:bg-rose-700 text-white font-bold text-xs rounded-lg transition shadow border border-rose-500 flex items-center gap-1">
                 🛑 RESETTA PARTITA
             </button>
             <div id="game-status-badge" class="px-4 py-2 bg-blue-600 rounded-full font-bold text-sm">LOBBY</div>
@@ -25,8 +25,11 @@
 
         <!-- LOBBY -->
         <div id="lobby-view" class="text-center">
-            <h2 class="text-2xl font-bold mb-6">In attesa che le squadre entrino...</h2>
+            <h2 id="lobby-title" class="text-2xl font-bold mb-2">In attesa che le squadre entrino...</h2>
+            <p id="loading-notice" class="text-amber-300 font-semibold mb-6 animate-pulse">⏳ Scaricamento e traduzione delle domande in corso...</p>
+            
             <div id="teams-grid" class="grid grid-cols-2 md:grid-cols-4 gap-4 max-w-4xl mx-auto mb-8"></div>
+            
             <button id="start-btn" onclick="startGame()" class="px-8 py-4 bg-emerald-500 hover:bg-emerald-600 font-black text-xl rounded-xl shadow-lg transition transform hover:scale-105 disabled:opacity-50 disabled:cursor-not-allowed" disabled>
                 AVVIA LA PARTITA
             </button>
@@ -102,9 +105,28 @@
         const actionFeedback = document.getElementById('action-feedback');
         const nextQBtn = document.getElementById('next-q-btn');
         const gameStatusBadge = document.getElementById('game-status-badge');
+        const loadingNotice = document.getElementById('loading-notice');
+
+        let globalIsReady = false;
+        let globalTeamsCount = 0;
 
         socket.on('update_state', (state) => updateUI(state));
-        socket.on('update_teams', (teams) => renderTeams(teams));
+        socket.on('update_teams', (teams) => {
+            globalTeamsCount = teams.length;
+            renderTeams(teams);
+            checkStartButton();
+        });
+
+        socket.on('loading_status', (msg) => {
+            if (msg) {
+                loadingNotice.innerText = msg;
+                loadingNotice.classList.remove('hidden');
+            } else {
+                loadingNotice.classList.add('hidden');
+                globalIsReady = true;
+                checkStartButton();
+            }
+        });
 
         socket.on('answer_result', (data) => {
             if (data.correct) {
@@ -142,10 +164,15 @@
             }
         }
 
-        function renderTeams(teams) {
-            if (teams.length > 0) startBtn.removeAttribute('disabled');
-            else startBtn.setAttribute('disabled', 'true');
+        function checkStartButton() {
+            if (globalIsReady && globalTeamsCount > 0) {
+                startBtn.removeAttribute('disabled');
+            } else {
+                startBtn.setAttribute('disabled', 'true');
+            }
+        }
 
+        function renderTeams(teams) {
             teamsGrid.innerHTML = teams.map(t => `
                 <div class="bg-slate-800 border border-slate-700 p-4 rounded-xl text-center font-bold text-lg text-indigo-300 shadow">${t.name}</div>
             `).join('');
@@ -159,7 +186,16 @@
         }
 
         function updateUI(state) {
-            renderTeams(state.teams);
+            if (state.isReadyToStart !== undefined) {
+                globalIsReady = state.isReadyToStart;
+                if (globalIsReady) loadingNotice.classList.add('hidden');
+            }
+            if (state.teams) {
+                globalTeamsCount = state.teams.length;
+                renderTeams(state.teams);
+            }
+            checkStartButton();
+
             gameStatusBadge.innerText = state.gameState;
 
             if (state.gameState === 'LOBBY') {
