@@ -17,7 +17,7 @@ let buzzerQueue = [];
 let currentAnsweringIndex = 0;
 let eliminatedOptions = [];
 let isReadyToStart = false;
-let autoNextTimer = null; // Memorizza il timer per eventuale pulizia
+let autoNextTimer = null;
 
 function decodeHTML(html) {
     return html.replace(/&quot;/g, '"')
@@ -67,9 +67,11 @@ async function fetchAndTranslateQuestions() {
                 let rawCorrectEn = decodeHTML(q.correct_answer);
                 let rawIncorrectsEn = q.incorrect_answers.map(ans => decodeHTML(ans));
 
+                // Traduce in italiano
                 let questionIt = await translateText(rawQuestionEn);
                 let categoryIt = await translateText(rawCategoryEn);
                 
+                // Mescola le opzioni in inglese
                 let optionsEnList = [...rawIncorrectsEn, rawCorrectEn].sort(() => Math.random() - 0.5);
                 
                 let optionsEn = {};
@@ -77,8 +79,7 @@ async function fetchAndTranslateQuestions() {
                 const keys = ['A', 'B', 'C', 'D'];
 
                 optionsEnList.forEach((optEn, idx) => {
-                    let key = keys[idx];
-                    optionsEn[key] = optEn;
+                    optionsEn[keys[idx]] = optEn;
                 });
 
                 let finalCorrectKey = 'A';
@@ -257,7 +258,6 @@ function startQuestion() {
 function scheduleNextQuestion() {
     if (autoNextTimer) clearTimeout(autoNextTimer);
     
-    // Timer di 5 secondi prima di avanzare automaticamente
     autoNextTimer = setTimeout(() => {
         currentQuestionIndex++;
         if (currentQuestionIndex < questions.length) {
