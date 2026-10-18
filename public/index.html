@@ -26,7 +26,7 @@
         <!-- LOBBY -->
         <div id="lobby-view" class="text-center">
             <h2 id="lobby-title" class="text-2xl font-bold mb-2">In attesa che le squadre entrino...</h2>
-            <p id="loading-notice" class="text-amber-300 font-semibold mb-6 animate-pulse">⏳ Scaricamento e traduzione delle domande in corso...</p>
+            <p id="loading-notice" class="text-amber-300 font-semibold mb-6 animate-pulse">⏳ Caricamento rapido in corso...</p>
             
             <div id="teams-grid" class="grid grid-cols-2 md:grid-cols-4 gap-4 max-w-4xl mx-auto mb-8"></div>
             
@@ -41,7 +41,7 @@
                 <div>
                     <div class="flex justify-between items-center text-sm text-slate-400 font-semibold mb-2">
                         <span id="q-category" class="bg-indigo-900 text-indigo-200 px-3 py-1 rounded-lg">CATEGORIA</span>
-                        <span id="q-counter">Domanda 1 / 30</span>
+                        <span id="q-counter">Domanda 1 / 25</span>
                     </div>
                     
                     <h2 id="q-text-it" class="text-2xl md:text-3xl font-bold mb-2 leading-snug text-white">Domanda in italiano...</h2>
@@ -55,7 +55,7 @@
                     <div id="opt-D" class="p-4 rounded-xl bg-slate-700 border border-slate-600 font-semibold text-lg flex flex-col"><div class="flex items-center"><span class="bg-indigo-600 w-8 h-8 rounded-lg flex items-center justify-center mr-3 font-bold">D</span> <span class="text-val-it">Opzione D</span></div><span class="text-xs text-slate-400 italic mt-1 pl-11 text-val-en">Opt D</span></div>
                 </div>
 
-                <!-- Feedback con indicatore del countdown automatico -->
+                <!-- Feedback senza mostrare la risposta corretta -->
                 <div class="mt-6 text-center font-bold text-lg min-h-[40px]">
                     <div id="action-feedback" class="text-amber-300"></div>
                     <div id="countdown-timer" class="text-slate-400 text-sm mt-1 hidden">Prossima domanda tra <span id="countdown-sec" class="text-amber-400 font-bold">5</span> secondi...</div>
@@ -128,19 +128,13 @@
             }
         });
 
+        // Gestione esito risposta senza spoilerare la lettera corretta
         socket.on('answer_result', (data) => {
             if (data.correct) {
-                actionFeedback.innerHTML = `🎉 Risposta CORRETTA da <span class="text-emerald-400">${data.teamName}</span>! Guadagna <span class="text-amber-400">+${data.points} punti</span>.`;
+                actionFeedback.innerHTML = `🎉 Risposta CORRETTA da <span class="text-emerald-400">${data.teamName}</span>! Guadagna <span class="text-amber-400">+1 punto</span>.`;
             } else {
                 actionFeedback.innerHTML = `❌ <span class="text-rose-400">${data.teamName}</span>: ${data.message}`;
-                if (data.correctOption) {
-                    setTimeout(() => {
-                        actionFeedback.innerHTML += ` Corretta: <span class="text-emerald-400 font-bold">${data.correctOption}</span>.`;
-                    }, 500);
-                }
             }
-            
-            // Avvia il conto alla rovescia visivo di 5 secondi
             startCountdown(5);
         });
 
@@ -238,14 +232,14 @@
             }
 
             if (state.currentQuestion) {
-                qCategory.innerText = state.currentQuestion.categoryIt.toUpperCase();
+                qCategory.innerText = state.currentQuestion.categoryIt ? state.currentQuestion.categoryIt.toUpperCase() : "CARICAMENTO...";
                 qCounter.innerText = `Domanda ${state.questionNumber} / ${state.totalQuestions}`;
-                qTextIt.innerText = state.currentQuestion.questionIt;
+                qTextIt.innerText = state.currentQuestion.questionIt || "Traduzione in corso...";
                 qTextEn.innerText = `EN: ${state.currentQuestion.questionEn}`;
 
                 ['A', 'B', 'C', 'D'].forEach(opt => {
                     const el = document.getElementById(`opt-${opt}`);
-                    el.querySelector('.text-val-it').innerText = state.currentQuestion.optionsIt[opt];
+                    el.querySelector('.text-val-it').innerText = state.currentQuestion.optionsIt ? state.currentQuestion.optionsIt[opt] : "...";
                     el.querySelector('.text-val-en').innerText = state.currentQuestion.optionsEn[opt];
                     
                     el.className = "p-4 rounded-xl bg-slate-700 border border-slate-600 font-semibold text-lg flex flex-col transition";
@@ -260,11 +254,11 @@
                 if (state.gameState === 'QUESTION_OPEN') actionFeedback.innerText = "PRENOTATEVI!";
             } else {
                 buzzerList.innerHTML = state.buzzerQueue.map((b, idx) => {
-                    let badge = idx === 0 ? `<span class="bg-amber-500 text-slate-900 text-xs px-2 py-0.5 rounded font-black">1° RISPONDE</span>` :
-                                idx === 1 ? `<span class="bg-blue-500 text-white text-xs px-2 py-0.5 rounded font-black">2° BACKUP</span>` :
-                                `<span class="bg-slate-700 text-slate-400 text-xs px-2 py-0.5 rounded">${idx+1}°</span>`;
+                    let badge = idx === state.currentAnsweringIndex ? `<span class="bg-amber-500 text-slate-900 text-xs px-2 py-0.5 rounded font-black">⚡ RISPONDE ORA</span>` :
+                                idx < state.currentAnsweringIndex ? `<span class="bg-rose-900 text-rose-200 text-xs px-2 py-0.5 rounded line-through">ERRATO</span>` :
+                                `<span class="bg-blue-500 text-white text-xs px-2 py-0.5 rounded font-black">${idx+1}° IN CODA</span>`;
                     return `
-                        <li class="flex justify-between items-center bg-slate-900 p-3 rounded-lg border ${idx === 0 ? 'border-amber-500/50 bg-amber-500/10' : 'border-slate-800'}">
+                        <li class="flex justify-between items-center bg-slate-900 p-3 rounded-lg border ${idx === state.currentAnsweringIndex ? 'border-amber-500/50 bg-amber-500/10' : 'border-slate-800'}">
                             <div><span class="font-bold">${b.teamName}</span><div class="text-xs text-slate-400">+${b.delay}s</div></div>
                             <div>${badge}</div>
                         </li>
@@ -273,9 +267,9 @@
 
                 if (state.gameState === 'ANSWERING' && state.buzzerQueue.length > 0) {
                     const currentTeam = state.buzzerQueue[state.currentAnsweringIndex];
-                    actionFeedback.innerHTML = state.currentAnsweringIndex === 0 ? 
-                        `⚡ Tocca a <span class="text-amber-400 font-bold">${currentTeam.teamName}</span> (1° tentativo - 1 pt)` :
-                        `⚡ Tentativo di riserva per <span class="text-blue-400 font-bold">${currentTeam.teamName}</span> (2° tentativo - 0.5 pt)`;
+                    if (currentTeam) {
+                        actionFeedback.innerHTML = `⚡ Tocca a <span class="text-amber-400 font-bold">${currentTeam.teamName}</span> (Tentativo ${state.currentAnsweringIndex + 1}° in coda - 1 pt)`;
+                    }
                 }
             }
         }
