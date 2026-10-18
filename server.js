@@ -7,19 +7,23 @@ const app = express();
 const server = http.createServer(app);
 const io = new Server(server);
 
+// Configurazione cartella statica per il frontend
 app.use(express.static(path.join(__dirname, 'public')));
 
+// Stato globale del gioco
 let questions = [];
-let teams = [];
+let teams = []; // { id, name, score }
 let currentQuestionIndex = -1;
-let gameState = 'LOBBY';
-let buzzerQueue = [];
+let gameState = 'LOBBY'; // LOBBY, QUESTION_OPEN, ANSWERING, QUESTION_ENDED, GAME_OVER
+let buzzerQueue = []; // [{ socketId, teamName, timestamp, delay }]
 let currentAnsweringIndex = 0;
 let eliminatedOptions = [];
 let isReadyToStart = false;
 let autoNextTimer = null;
 
+// Funzione per ripulire i codici ed entità HTML
 function decodeHTML(html) {
+    if (!html) return "";
     return html.replace(/&quot;/g, '"')
                .replace(/&#039;/g, "'")
                .replace(/&amp;/g, '&')
@@ -30,39 +34,45 @@ function decodeHTML(html) {
                .replace(/&rdquo;/g, '"');
 }
 
-// Funzione di traduzione con pausa di sicurezza anti-blocco IP
+// Funzione di traduzione sicura con User-Agent e micro-pausa anti-blocco IP
 async function translateText(text) {
     if (!text || text.trim() === "") return "";
-    try {
-        // Pausa di 300ms per evitare il ban di Google per troppe richieste rapide
-        await new Promise(resolve => setTimeout(resolve, 300));
+    let cleanText = decodeHTML(text);
 
-        const url = `https://translate.googleapis.com/translate_a/single?client=gtx&sl=en&tl=it&dt=t&q=${encodeURIComponent(text)}`;
+    try {
+        // Pausa di 250ms per scaglionare le chiamate e non far bannare l'IP da Google
+        await new Promise(resolve => setTimeout(resolve, 250));
+
+        const url = `https://translate.googleapis.com/translate_a/single?client=gtx&sl=en&tl=it&dt=t&q=${encodeURIComponent(cleanText)}`;
         const res = await fetch(url, {
             headers: {
                 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
             }
         });
+
+        if (!res.ok) return cleanText;
+
         const data = await res.json();
-        
-        if (data && data[0]) {
-            let translated = data[0].map(item => item[0]).join('');
-            return decodeHTML(translated);
+        if (data && Array.isArray(data[0])) {
+            let translated = data[0].map(item => item[0] ? item[0] : '').join('');
+            if (translated.trim() !== "") {
+                return decodeHTML(translated);
+            }
         }
     } catch (e) {
-        console.error("Errore di traduzione con Google Translate:", e);
+        console.error("Errore di traduzione:", e.message);
     }
-    return text; // Fallback al testo originale in caso di errore di rete
+    return cleanText; // Fallback al testo originale se la rete fallisce
 }
 
+// Caricamento e traduzione delle domande dall'Open Trivia Database
 async function fetchAndTranslateQuestions() {
-    console.log("Scaricamento e traduzione delle domande in corso...");
+    console.log("🔄 Scaricamento e traduzione delle domande in corso...");
     isReadyToStart = false;
     io.emit('loading_status', "Scaricamento e traduzione domande in corso... Attendere.");
 
     try {
-        // Scarichiamo 15 domande per renderlo velocissimo e sicurissimo contro i blocchi
-        const response = await fetch('https://opentdb.com/api.php?amount=15&type=multiple');
+        const response = await fetch('https://opentdb.com/api.php?amount=20&type=multiple');
         const data = await response.json();
         
         if (data.results && data.results.length > 0) {
@@ -76,10 +86,11 @@ async function fetchAndTranslateQuestions() {
                 let rawCorrectEn = decodeHTML(q.correct_answer);
                 let rawIncorrectsEn = q.incorrect_answers.map(ans => decodeHTML(ans));
 
-                // Traduce in italiano in modo scaglionato
+                // Traduzione in italiano
                 let questionIt = await translateText(rawQuestionEn);
                 let categoryIt = await translateText(rawCategoryEn);
                 
+                // Opzioni e mescolamento casuale (A, B, C, D)
                 let optionsEnList = [...rawIncorrectsEn, rawCorrectEn].sort(() => Math.random() - 0.5);
                 
                 let optionsEn = {};
@@ -114,21 +125,24 @@ async function fetchAndTranslateQuestions() {
 
             questions = loadedQuestions;
             isReadyToStart = true;
-            console.log(`✅ Tradotte e caricate con successo ${questions.length} domande!`);
+            console.log(`✅ Pronte e tradotte ${questions.length} domande!`);
             io.emit('loading_status', "");
             io.emit('update_state', getGameStatePayload());
         }
     } catch (err) {
-        console.error("Errore nel recupero delle domande:", err);
-        io.emit('loading_status', "Errore di caricamento domande. Ricarica la pagina.");
+        console.error("Errore critico nel recupero delle domande:", err);
+        io.emit('loading_status', "Errore di caricamento. Ricarica la pagina.");
     }
 }
 
+// Avvia il recupero all'avvio
 fetchAndTranslateQuestions();
 
+// Gestione delle connessioni Socket.io
 io.on('connection', (socket) => {
     console.log(`Dispositivo connesso: ${socket.id}`);
 
+    // Invia lo stato attuale al client appena connesso
     socket.emit('update_state', {
         gameState,
         teams,
@@ -139,6 +153,7 @@ io.on('connection', (socket) => {
         isReadyToStart
     });
 
+    // Registrazione squadra dal telefono
     socket.on('register_team', (teamName) => {
         if (!teamName || teamName.trim() === "") return;
         const exists = teams.some(t => t.name.toLowerCase() === teamName.toLowerCase());
@@ -153,12 +168,14 @@ io.on('connection', (socket) => {
         io.emit('update_state', getGameStatePayload());
     });
 
+    // Avvio della partita dal PC
     socket.on('start_game', () => {
         if (!isReadyToStart || teams.length === 0 || questions.length === 0) return;
         currentQuestionIndex = 0;
         startQuestion();
     });
 
+    // Interruzione e reset della partita
     socket.on('reset_game', () => {
         if (autoNextTimer) clearTimeout(autoNextTimer);
         gameState = 'LOBBY';
@@ -172,6 +189,7 @@ io.on('connection', (socket) => {
         io.emit('update_state', getGameStatePayload());
     });
 
+    // Pressione del buzzer dal telefono
     socket.on('press_buzzer', () => {
         if (gameState !== 'QUESTION_OPEN') return;
         const team = teams.find(t => t.id === socket.id);
@@ -197,6 +215,7 @@ io.on('connection', (socket) => {
         io.emit('update_state', getGameStatePayload());
     });
 
+    // Invio della risposta dal telefono
     socket.on('submit_answer', (chosenOption) => {
         if (gameState !== 'ANSWERING') return;
 
@@ -247,6 +266,7 @@ io.on('connection', (socket) => {
         }
     });
 
+    // Gestione disconnessione dispositivo
     socket.on('disconnect', () => {
         teams = teams.filter(t => t.id !== socket.id);
         io.emit('update_teams', teams);
@@ -254,6 +274,7 @@ io.on('connection', (socket) => {
     });
 });
 
+// Funzione per aprire una nuova domanda
 function startQuestion() {
     if (autoNextTimer) clearTimeout(autoNextTimer);
     gameState = 'QUESTION_OPEN';
@@ -263,6 +284,7 @@ function startQuestion() {
     io.emit('update_state', getGameStatePayload());
 }
 
+// Timer automatico di 5 secondi per passare alla domanda successiva
 function scheduleNextQuestion() {
     if (autoNextTimer) clearTimeout(autoNextTimer);
     
@@ -277,6 +299,7 @@ function scheduleNextQuestion() {
     }, 5000);
 }
 
+// Struttura dati dello stato di gioco da inviare ai client
 function getGameStatePayload() {
     return {
         gameState,
