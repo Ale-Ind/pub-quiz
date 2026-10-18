@@ -1,0 +1,167 @@
+<!DOCTYPE html>
+<html lang="it">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Pub Quiz - Controller Squadra</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="/socket.io/socket.io.js"></script>
+</head>
+<body class="bg-slate-950 text-white min-h-screen flex flex-col justify-between p-4 select-none">
+
+    <!-- LOGIN -->
+    <div id="login-screen" class="flex flex-col justify-center flex-grow max-w-sm mx-auto w-full text-center">
+        <div class="mb-8">
+            <h1 class="text-3xl font-black text-amber-400">🧠 PUB QUIZ</h1>
+            <p class="text-slate-400 text-sm mt-2">Inserisci il nome della tua squadra</p>
+        </div>
+        <div class="space-y-4">
+            <input type="text" id="team-name-input" placeholder="Nome della squadra..." class="w-full px-4 py-3 rounded-xl bg-slate-900 border border-slate-700 text-white text-center font-bold text-lg focus:outline-none focus:border-amber-400" autocomplete="off" />
+            <button onclick="registerTeam()" class="w-full py-4 bg-amber-500 hover:bg-amber-600 text-slate-950 font-black text-lg rounded-xl shadow-lg transition">ENTRA IN GIOCO</button>
+            <p id="error-msg" class="text-rose-500 font-semibold text-sm"></p>
+        </div>
+    </div>
+
+    <!-- CONTROLLER -->
+    <div id="controller-screen" class="hidden flex flex-col justify-between flex-grow max-w-sm mx-auto w-full text-center py-4">
+        <div class="bg-slate-900 border border-slate-800 p-3 rounded-xl flex justify-between items-center">
+            <span class="text-xs text-slate-400">Squadra:</span>
+            <span id="my-team-name" class="font-bold text-amber-400 text-lg">Nome</span>
+        </div>
+
+        <div class="my-auto py-8">
+            <div id="state-waiting" class="space-y-4">
+                <div class="w-24 h-24 bg-slate-900 border-4 border-slate-800 rounded-full flex items-center justify-center mx-auto animate-pulse">
+                    <span class="text-3xl">⏳</span>
+                </div>
+                <h2 class="text-xl font-bold text-slate-300">In attesa del conduttore...</h2>
+            </div>
+
+            <div id="state-buzzer" class="hidden space-y-4">
+                <button onclick="pressBuzzer()" class="w-64 h-64 mx-auto bg-gradient-to-t from-rose-700 to-rose-500 active:scale-95 rounded-full flex flex-col items-center justify-center shadow-[0_0_50px_rgba(225,29,72,0.6)] border-8 border-rose-300 transition-all">
+                    <span class="text-3xl font-black text-white">PRENOTATI!</span>
+                </button>
+                <p class="text-slate-400 text-sm font-semibold">I buzzer sono aperti!</p>
+            </div>
+
+            <div id="state-queued" class="hidden space-y-4">
+                <div class="w-20 h-20 bg-amber-500/20 border-2 border-amber-500 rounded-full flex items-center justify-center mx-auto">
+                    <span class="text-2xl">⚡</span>
+                </div>
+                <h2 id="queue-status-text" class="text-xl font-bold text-amber-400">Sei in coda!</h2>
+                <p class="text-slate-400 text-sm">Se chi è davanti sbaglia, toccherà a voi!</p>
+            </div>
+
+            <div id="state-answering" class="hidden space-y-4">
+                <h2 class="text-2xl font-black text-emerald-400">TOCCA A VOI! 🎯</h2>
+                <p class="text-slate-300 text-sm mb-4">Scegli la risposta corretta:</p>
+                <div class="grid grid-cols-2 gap-4">
+                    <button onclick="submitAnswer('A')" id="btn-opt-A" class="py-6 bg-indigo-600 font-black text-2xl rounded-2xl shadow border-b-4 border-indigo-800 active:border-b-0 active:translate-y-1 transition">A</button>
+                    <button onclick="submitAnswer('B')" id="btn-opt-B" class="py-6 bg-indigo-600 font-black text-2xl rounded-2xl shadow border-b-4 border-indigo-800 active:border-b-0 active:translate-y-1 transition">B</button>
+                    <button onclick="submitAnswer('C')" id="btn-opt-C" class="py-6 bg-indigo-600 font-black text-2xl rounded-2xl shadow border-b-4 border-indigo-800 active:border-b-0 active:translate-y-1 transition">C</button>
+                    <button onclick="submitAnswer('D')" id="btn-opt-D" class="py-6 bg-indigo-600 font-black text-2xl rounded-2xl shadow border-b-4 border-indigo-800 active:border-b-0 active:translate-y-1 transition">D</button>
+                </div>
+            </div>
+
+            <div id="state-ended" class="hidden space-y-4">
+                <h2 class="text-xl font-bold text-slate-300">Domanda conclusa. Attendi la prossima.</h2>
+            </div>
+        </div>
+
+        <div class="text-center text-xs text-slate-600">Pub Quiz Controller</div>
+    </div>
+
+    <script>
+        const socket = io();
+        let hasBuzzedThisQuestion = false;
+
+        const loginScreen = document.getElementById('login-screen');
+        const controllerScreen = document.getElementById('controller-screen');
+        const teamNameInput = document.getElementById('team-name-input');
+        const errorMsg = document.getElementById('error-msg');
+        const myTeamNameDisplay = document.getElementById('my-team-name');
+
+        const stateWaiting = document.getElementById('state-waiting');
+        const stateBuzzer = document.getElementById('state-buzzer');
+        const stateQueued = document.getElementById('state-queued');
+        const stateAnswering = document.getElementById('state-answering');
+        const stateEnded = document.getElementById('state-ended');
+        const queueStatusText = document.getElementById('queue-status-text');
+
+        function registerTeam() {
+            const name = teamNameInput.value.trim();
+            if (!name) { errorMsg.innerText = "Inserisci un nome!"; return; }
+            socket.emit('register_team', name);
+        }
+
+        socket.on('registration_success', (name) => {
+            myTeamNameDisplay.innerText = name;
+            loginScreen.classList.add('hidden');
+            controllerScreen.classList.remove('hidden');
+        });
+
+        socket.on('registration_error', (msg) => { errorMsg.innerText = msg; });
+
+        function pressBuzzer() {
+            if (hasBuzzedThisQuestion) return;
+            hasBuzzedThisQuestion = true;
+            socket.emit('press_buzzer');
+            if (navigator.vibrate) navigator.vibrate(200);
+        }
+
+        function submitAnswer(option) { socket.emit('submit_answer', option); }
+
+        socket.on('update_state', (state) => {
+            if (state.gameState === 'QUESTION_OPEN') hasBuzzedThisQuestion = false;
+
+            stateWaiting.classList.add('hidden');
+            stateBuzzer.classList.add('hidden');
+            stateQueued.classList.add('hidden');
+            stateAnswering.classList.add('hidden');
+            stateEnded.classList.add('hidden');
+
+            if (state.gameState === 'LOBBY' || state.gameState === 'GAME_OVER') {
+                stateWaiting.classList.remove('hidden');
+                stateWaiting.querySelector('h2').innerText = "In attesa dell'inizio...";
+                return;
+            }
+
+            if (state.gameState === 'QUESTION_OPEN') {
+                stateBuzzer.classList.remove('hidden');
+                return;
+            }
+
+            if (state.gameState === 'ANSWERING') {
+                const currentTeamInQueue = state.buzzerQueue[state.currentAnsweringIndex];
+                const amITheAnsweringTeam = currentTeamInQueue && currentTeamInQueue.socketId === socket.id;
+
+                if (amITheAnsweringTeam) {
+                    stateAnswering.classList.remove('hidden');
+                    ['A', 'B', 'C', 'D'].forEach(opt => {
+                        let btn = document.getElementById(`btn-opt-${opt}`);
+                        if (state.eliminatedOptions.includes(opt)) {
+                            btn.classList.add('opacity-30', 'pointer-events-none', 'bg-slate-800');
+                        } else {
+                            btn.classList.remove('opacity-30', 'pointer-events-none', 'bg-slate-800');
+                        }
+                    });
+                } else {
+                    const myQueuePosition = state.buzzerQueue.findIndex(b => b.socketId === socket.id);
+                    if (myQueuePosition !== -1) {
+                        stateQueued.classList.remove('hidden');
+                        queueStatusText.innerText = `Sei in coda al ${myQueuePosition + 1}° posto!`;
+                    } else {
+                        stateWaiting.classList.remove('hidden');
+                        stateWaiting.querySelector('h2').innerText = "Tempo scaduto o non prenotato!";
+                    }
+                }
+                return;
+            }
+
+            if (state.gameState === 'QUESTION_ENDED') {
+                stateEnded.classList.remove('hidden');
+            }
+        });
+    </script>
+</body>
+</html>

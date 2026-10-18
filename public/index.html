@@ -1,0 +1,209 @@
+<!DOCTYPE html>
+<html lang="it">
+<head>
+    <meta charset="UTF-8">
+    <title>Pub Quiz - Tabellone Principale</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="/socket.io/socket.io.js"></script>
+</head>
+<body class="bg-slate-900 text-white min-h-screen flex flex-col justify-between p-6">
+
+    <header class="flex justify-between items-center border-b border-slate-700 pb-4">
+        <div>
+            <h1 class="text-3xl font-black text-amber-400">🧠 SUPER PUB QUIZ</h1>
+            <p class="text-sm text-slate-400 mt-1">Collega i telefoni all'indirizzo web seguito da <code class="text-amber-300">/controller.html</code></p>
+        </div>
+        <div id="game-status-badge" class="px-4 py-2 bg-blue-600 rounded-full font-bold text-sm">LOBBY</div>
+    </header>
+
+    <main class="flex-grow my-6 flex flex-col justify-center">
+
+        <!-- LOBBY -->
+        <div id="lobby-view" class="text-center">
+            <h2 class="text-2xl font-bold mb-6">In attesa che le squadre entrino...</h2>
+            <div id="teams-grid" class="grid grid-cols-2 md:grid-cols-4 gap-4 max-w-4xl mx-auto mb-8"></div>
+            <button id="start-btn" onclick="startGame()" class="px-8 py-4 bg-emerald-500 hover:bg-emerald-600 font-black text-xl rounded-xl shadow-lg transition transform hover:scale-105 disabled:opacity-50 disabled:cursor-not-allowed" disabled>
+                AVVIA LA PARTITA
+            </button>
+        </div>
+
+        <!-- GAMEPLAY -->
+        <div id="game-view" class="hidden grid grid-cols-1 lg:grid-cols-3 gap-6">
+            <div class="lg:col-span-2 flex flex-col justify-between bg-slate-800 p-8 rounded-2xl shadow-xl border border-slate-700">
+                <div>
+                    <div class="flex justify-between items-center text-sm text-slate-400 font-semibold mb-2">
+                        <span id="q-category" class="bg-indigo-900 text-indigo-200 px-3 py-1 rounded-lg">CATEGORIA</span>
+                        <span id="q-counter">Domanda 1 / 30</span>
+                    </div>
+                    
+                    <!-- Domanda principale in ITALIANO -->
+                    <h2 id="q-text-it" class="text-2xl md:text-3xl font-bold mb-2 leading-snug text-white">Domanda in italiano...</h2>
+                    
+                    <!-- Traduzione / Testo originale in INGLESE affiancato in piccolo -->
+                    <p id="q-text-en" class="text-xs text-slate-400 italic mb-6">Original (EN): ...</p>
+                </div>
+
+                <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+                    <div id="opt-A" class="p-4 rounded-xl bg-slate-700 border border-slate-600 font-semibold text-lg flex flex-col"><div class="flex items-center"><span class="bg-indigo-600 w-8 h-8 rounded-lg flex items-center justify-center mr-3 font-bold">A</span> <span class="text-val-it">Opzione A</span></div><span class="text-xs text-slate-400 italic mt-1 pl-11 text-val-en">Opt A</span></div>
+                    <div id="opt-B" class="p-4 rounded-xl bg-slate-700 border border-slate-600 font-semibold text-lg flex flex-col"><div class="flex items-center"><span class="bg-indigo-600 w-8 h-8 rounded-lg flex items-center justify-center mr-3 font-bold">B</span> <span class="text-val-it">Opzione B</span></div><span class="text-xs text-slate-400 italic mt-1 pl-11 text-val-en">Opt B</span></div>
+                    <div id="opt-C" class="p-4 rounded-xl bg-slate-700 border border-slate-600 font-semibold text-lg flex flex-col"><div class="flex items-center"><span class="bg-indigo-600 w-8 h-8 rounded-lg flex items-center justify-center mr-3 font-bold">C</span> <span class="text-val-it">Opzione C</span></div><span class="text-xs text-slate-400 italic mt-1 pl-11 text-val-en">Opt C</span></div>
+                    <div id="opt-D" class="p-4 rounded-xl bg-slate-700 border border-slate-600 font-semibold text-lg flex flex-col"><div class="flex items-center"><span class="bg-indigo-600 w-8 h-8 rounded-lg flex items-center justify-center mr-3 font-bold">D</span> <span class="text-val-it">Opzione D</span></div><span class="text-xs text-slate-400 italic mt-1 pl-11 text-val-en">Opt D</span></div>
+                </div>
+
+                <div id="action-feedback" class="mt-6 text-center font-bold text-lg text-amber-300 min-h-[30px]"></div>
+
+                <div class="mt-6 flex justify-end">
+                    <button id="next-q-btn" onclick="nextQuestion()" class="hidden px-6 py-3 bg-amber-500 hover:bg-amber-600 text-slate-900 font-bold rounded-xl transition">
+                        PROSSIMA DOMANDA ➔
+                    </button>
+                </div>
+            </div>
+
+            <!-- Colonna Laterale Coda e Punteggi -->
+            <div class="flex flex-col gap-6">
+                <div class="bg-slate-800 p-6 rounded-2xl shadow-xl border border-slate-700 flex-grow">
+                    <h3 class="text-xl font-bold mb-4 text-indigo-400">⚡ Coda Prenotazioni</h3>
+                    <ul id="buzzer-list" class="space-y-3">
+                        <li class="text-slate-500 italic text-sm">In attesa...</li>
+                    </ul>
+                </div>
+
+                <div class="bg-slate-800 p-6 rounded-2xl shadow-xl border border-slate-700">
+                    <h3 class="text-xl font-bold mb-4 text-emerald-400">🏆 Punteggi</h3>
+                    <ul id="scoreboard-list" class="space-y-2"></ul>
+                </div>
+            </div>
+        </div>
+
+        <!-- GAME OVER -->
+        <div id="gameover-view" class="hidden text-center max-w-2xl mx-auto">
+            <h2 class="text-4xl font-black text-amber-400 mb-4">🏆 GIOCO TERMINATO!</h2>
+            <div id="final-scoreboard" class="space-y-4 mb-8"></div>
+            <button onclick="location.reload()" class="px-6 py-3 bg-indigo-600 hover:bg-indigo-700 font-bold rounded-xl">GIOCA ANCORA</button>
+        </div>
+
+    </main>
+
+    <script>
+        const socket = io();
+        const lobbyView = document.getElementById('lobby-view');
+        const gameView = document.getElementById('game-view');
+        const gameoverView = document.getElementById('gameover-view');
+        const teamsGrid = document.getElementById('teams-grid');
+        const startBtn = document.getElementById('start-btn');
+        const buzzerList = document.getElementById('buzzer-list');
+        const scoreboardList = document.getElementById('scoreboard-list');
+        const qCategory = document.getElementById('q-category');
+        const qCounter = document.getElementById('q-counter');
+        const qTextIt = document.getElementById('q-text-it');
+        const qTextEn = document.getElementById('q-text-en');
+        const actionFeedback = document.getElementById('action-feedback');
+        const nextQBtn = document.getElementById('next-q-btn');
+
+        socket.on('update_state', (state) => updateUI(state));
+        socket.on('update_teams', (teams) => renderTeams(teams));
+
+        socket.on('answer_result', (data) => {
+            if (data.correct) {
+                actionFeedback.innerHTML = `🎉 Risposta CORRETTA da <span class="text-emerald-400">${data.teamName}</span>! Guadagna <span class="text-amber-400">+${data.points} punti</span>.`;
+            } else {
+                actionFeedback.innerHTML = `❌ <span class="text-rose-400">${data.teamName}</span>: ${data.message}`;
+                if (data.correctOption) {
+                    setTimeout(() => {
+                        actionFeedback.innerHTML += ` Corretta: <span class="text-emerald-400 font-bold">${data.correctOption}</span>.`;
+                    }, 500);
+                }
+            }
+            nextQBtn.classList.remove('hidden');
+        });
+
+        socket.on('game_over', (data) => {
+            lobbyView.classList.add('hidden');
+            gameView.classList.add('hidden');
+            gameoverView.classList.remove('hidden');
+            const sorted = data.teams.sort((a,b) => b.score - a.score);
+            document.getElementById('final-scoreboard').innerHTML = sorted.map((t, idx) => `
+                <div class="flex justify-between items-center bg-slate-800 p-4 rounded-xl border border-slate-700">
+                    <span class="font-bold text-lg">#${idx + 1} ${t.name}</span>
+                    <span class="font-black text-amber-400 text-xl">${t.score} pt</span>
+                </div>
+            `).join('');
+        });
+
+        function startGame() { socket.emit('start_game'); }
+        function nextQuestion() { nextQBtn.classList.add('hidden'); socket.emit('next_question'); }
+
+        function renderTeams(teams) {
+            if (teams.length > 0) startBtn.removeAttribute('disabled');
+            else startBtn.setAttribute('disabled', 'true');
+
+            teamsGrid.innerHTML = teams.map(t => `
+                <div class="bg-slate-800 border border-slate-700 p-4 rounded-xl text-center font-bold text-lg text-indigo-300 shadow">${t.name}</div>
+            `).join('');
+
+            scoreboardList.innerHTML = teams.sort((a,b) => b.score - a.score).map((t, idx) => `
+                <li class="flex justify-between items-center bg-slate-900 px-4 py-2 rounded-lg text-sm">
+                    <span>${idx+1}. ${t.name}</span>
+                    <span class="font-bold text-amber-400">${t.score} pt</span>
+                </li>
+            `).join('');
+        }
+
+        function updateUI(state) {
+            renderTeams(state.teams);
+            if (state.gameState === 'LOBBY') {
+                lobbyView.classList.remove('hidden');
+                gameView.classList.add('hidden');
+            } else {
+                lobbyView.classList.add('hidden');
+                gameView.classList.remove('hidden');
+            }
+
+            if (state.currentQuestion) {
+                qCategory.innerText = state.currentQuestion.categoryIt.toUpperCase();
+                qCounter.innerText = `Domanda ${state.questionNumber} / ${state.totalQuestions}`;
+                qTextIt.innerText = state.currentQuestion.questionIt;
+                qTextEn.innerText = `EN: ${state.currentQuestion.questionEn}`;
+
+                ['A', 'B', 'C', 'D'].forEach(opt => {
+                    const el = document.getElementById(`opt-${opt}`);
+                    el.querySelector('.text-val-it').innerText = state.currentQuestion.optionsIt[opt];
+                    el.querySelector('.text-val-en').innerText = state.currentQuestion.optionsEn[opt];
+                    
+                    el.className = "p-4 rounded-xl bg-slate-700 border border-slate-600 font-semibold text-lg flex flex-col transition";
+                    if (state.eliminatedOptions.includes(opt)) {
+                        el.classList.add('opacity-30', 'line-through', 'border-rose-500');
+                    }
+                });
+            }
+
+            if (state.buzzerQueue.length === 0) {
+                buzzerList.innerHTML = `<li class="text-slate-500 italic text-sm">In attesa...</li>`;
+                actionFeedback.innerText = "PRENOTATEVI!";
+            } else {
+                buzzerList.innerHTML = state.buzzerQueue.map((b, idx) => {
+                    let badge = idx === 0 ? `<span class="bg-amber-500 text-slate-900 text-xs px-2 py-0.5 rounded font-black">1° RISPONDE</span>` :
+                                idx === 1 ? `<span class="bg-blue-500 text-white text-xs px-2 py-0.5 rounded font-black">2° BACKUP</span>` :
+                                `<span class="bg-slate-700 text-slate-400 text-xs px-2 py-0.5 rounded">${idx+1}°</span>`;
+                    return `
+                        <li class="flex justify-between items-center bg-slate-900 p-3 rounded-lg border ${idx === 0 ? 'border-amber-500/50 bg-amber-500/10' : 'border-slate-800'}">
+                            <div><span class="font-bold">${b.teamName}</span><div class="text-xs text-slate-400">+${b.delay}s</div></div>
+                            <div>${badge}</div>
+                        </li>
+                    `;
+                }).join('');
+
+                if (state.gameState === 'ANSWERING' && state.buzzerQueue.length > 0) {
+                    const currentTeam = state.buzzerQueue[state.currentAnsweringIndex];
+                    actionFeedback.innerHTML = state.currentAnsweringIndex === 0 ? 
+                        `⚡ Tocca a <span class="text-amber-400 font-bold">${currentTeam.teamName}</span> (1° tentativo - 1 pt)` :
+                        `⚡ Tentativo di riserva per <span class="text-blue-400 font-bold">${currentTeam.teamName}</span> (2° tentativo - 0.5 pt)`;
+                }
+            }
+
+            if (state.gameState === 'QUESTION_ENDED') nextQBtn.classList.remove('hidden');
+            else nextQBtn.classList.add('hidden');
+        }
+    </script>
+</body>
+</html>
