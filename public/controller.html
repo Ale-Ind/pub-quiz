@@ -38,10 +38,10 @@
             </div>
 
             <div id="state-buzzer" class="hidden space-y-4">
-                <button onclick="pressBuzzer()" class="w-64 h-64 mx-auto bg-gradient-to-t from-rose-700 to-rose-500 active:scale-95 rounded-full flex flex-col items-center justify-center shadow-[0_0_50px_rgba(225,29,72,0.6)] border-8 border-rose-300 transition-all">
-                    <span class="text-3xl font-black text-white">PRENOTATI!</span>
+                <button onclick="pressBuzzer()" id="buzzer-btn" class="w-64 h-64 mx-auto bg-gradient-to-t from-rose-700 to-rose-500 active:scale-95 rounded-full flex flex-col items-center justify-center shadow-[0_0_50px_rgba(225,29,72,0.6)] border-8 border-rose-300 transition-all">
+                    <span id="buzzer-text" class="text-3xl font-black text-white">PRENOTATI!</span>
                 </button>
-                <p class="text-slate-400 text-sm font-semibold">I buzzer sono aperti!</p>
+                <p id="buzzer-subtext" class="text-slate-400 text-sm font-semibold">Finestra aperta per 3 secondi!</p>
             </div>
 
             <div id="state-queued" class="hidden space-y-4">
@@ -73,7 +73,7 @@
 
     <script>
         const socket = io();
-        let hasBuzzedThisQuestion = false;
+        let hasClickedBuzzerThisRound = false;
 
         const loginScreen = document.getElementById('login-screen');
         const controllerScreen = document.getElementById('controller-screen');
@@ -87,6 +87,7 @@
         const stateAnswering = document.getElementById('state-answering');
         const stateEnded = document.getElementById('state-ended');
         const queueStatusText = document.getElementById('queue-status-text');
+        const buzzerText = document.getElementById('buzzer-text');
 
         function registerTeam() {
             const name = teamNameInput.value.trim();
@@ -103,16 +104,20 @@
         socket.on('registration_error', (msg) => { errorMsg.innerText = msg; });
 
         function pressBuzzer() {
-            if (hasBuzzedThisQuestion) return;
-            hasBuzzedThisQuestion = true;
             socket.emit('press_buzzer');
+            hasClickedBuzzerThisRound = true;
+            buzzerText.innerText = "PRENOTATO! ⚡";
             if (navigator.vibrate) navigator.vibrate(200);
         }
 
         function submitAnswer(option) { socket.emit('submit_answer', option); }
 
         socket.on('update_state', (state) => {
-            if (state.gameState === 'QUESTION_OPEN') hasBuzzedThisQuestion = false;
+            // Quando si apre una nuova domanda, resettiamo il flag del buzzer
+            if (state.gameState === 'BUZZER_WINDOW') {
+                hasClickedBuzzerThisRound = false;
+                buzzerText.innerText = "PRENOTATI!";
+            }
 
             stateWaiting.classList.add('hidden');
             stateBuzzer.classList.add('hidden');
@@ -126,7 +131,8 @@
                 return;
             }
 
-            if (state.gameState === 'QUESTION_OPEN') {
+            // Finestra di 3 secondi in cui tutti possono premere liberamente
+            if (state.gameState === 'BUZZER_WINDOW') {
                 stateBuzzer.classList.remove('hidden');
                 return;
             }
@@ -152,7 +158,7 @@
                         queueStatusText.innerText = `Sei in coda al ${myQueuePosition + 1}° posto!`;
                     } else {
                         stateWaiting.classList.remove('hidden');
-                        stateWaiting.querySelector('h2').innerText = "Tempo scaduto o non prenotato!";
+                        stateWaiting.querySelector('h2').innerText = "Non ti sei prenotato in tempo!";
                     }
                 }
                 return;
