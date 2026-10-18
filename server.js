@@ -29,7 +29,7 @@ function decodeHTML(html) {
                .replace(/&rdquo;/g, '"');
 }
 
-// Funzione di traduzione automatica GRATUITA e SENZA LIMITI con Google Translate
+// Funzione di traduzione automatica GRATUITA e ILLIMITATA con Google Translate
 async function translateText(text) {
     if (!text || text.trim() === "") return "";
     try {
@@ -37,7 +37,6 @@ async function translateText(text) {
         const res = await fetch(url);
         const data = await res.json();
         
-        // Google Translate restituisce la traduzione in un array strutturato
         if (data && data[0]) {
             let translated = data[0].map(item => item[0]).join('');
             return decodeHTML(translated);
@@ -45,7 +44,7 @@ async function translateText(text) {
     } catch (e) {
         console.error("Errore di traduzione con Google Translate:", e);
     }
-    return text; // Fallback al testo originale in caso di errore di rete
+    return text; // Fallback al testo originale in caso di errore
 }
 
 // Scarica le domande in inglese e le traduce in italiano
@@ -70,19 +69,9 @@ async function fetchAndTranslateQuestions() {
                 // Traduce in italiano
                 let questionIt = await translateText(rawQuestionEn);
                 let categoryIt = await translateText(rawCategoryEn);
-                let correctIt = await translateText(rawCorrectEn);
                 
-                let incorrectsIt = [];
-                for (let inc of rawIncorrectsEn) {
-                    incorrectsIt.push(await translateText(inc));
-                }
-
-                // Unisce e mescola le opzioni (A, B, C, D) sia per EN che per IT
+                // Unisce e mescola le opzioni (A, B, C, D)
                 let optionsEnList = [...rawIncorrectsEn, rawCorrectEn].sort(() => Math.random() - 0.5);
-                let optionsItList = [];
-                
-                // Mappa le traduzioni corrispondenti
-                let correctItIndex = optionsEnList.indexOf(rawCorrectEn);
                 
                 let optionsEn = {};
                 let optionsIt = {};
@@ -93,7 +82,6 @@ async function fetchAndTranslateQuestions() {
                     optionsEn[key] = optEn;
                 });
 
-                // Per sicurezza traduciamo direttamente le opzioni mescolate
                 let finalCorrectKey = 'A';
                 for (let idx = 0; idx < optionsEnList.length; idx++) {
                     let key = keys[idx];
