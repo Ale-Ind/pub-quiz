@@ -12,12 +12,13 @@ app.use(express.static(path.join(__dirname, 'public')));
 let questions = [];
 let teams = [];
 let currentQuestionIndex = -1;
-let gameState = 'LOBBY';
+let gameState = 'LOBBY'; // LOBBY, BUZZER_WINDOW, ANSWERING, QUESTION_ENDED, GAME_OVER
 let buzzerQueue = [];
 let currentAnsweringIndex = 0;
 let eliminatedOptions = [];
 let isReadyToStart = false;
 let autoNextTimer = null;
+let buzzerWindowTimer = null;
 
 function decodeHTML(html) {
     if (!html) return "";
@@ -174,6 +175,7 @@ io.on('connection', (socket) => {
 
     socket.on('reset_game', () => {
         if (autoNextTimer) clearTimeout(autoNextTimer);
+        if (buzzerWindowTimer) clearTimeout(buzzerWindowTimer);
         gameState = 'LOBBY';
         currentQuestionIndex = -1;
         buzzerQueue = [];
@@ -185,28 +187,21 @@ io.on('connection', (socket) => {
         io.emit('update_state', getGameStatePayload());
     });
 
+    // Registrazione della pressione del buzzer durante la finestra temporale
     socket.on('press_buzzer', () => {
-        if (gameState !== 'QUESTION_OPEN') return;
+        if (gameState !== 'BUZZER_WINDOW') return;
         const team = teams.find(t => t.id === socket.id);
         if (!team) return;
 
+        // Evita che la stessa squadra prema due volte nella stessa finestra
         if (buzzerQueue.some(b => b.socketId === socket.id)) return;
 
         const timestamp = Date.now();
-        const relativeTime = buzzerQueue.length === 0 ? 0 : ((timestamp - buzzerQueue[0].timestamp) / 1000).toFixed(3);
-
         buzzerQueue.push({
             socketId: socket.id,
             teamName: team.name,
-            timestamp: timestamp,
-            delay: relativeTime
+            timestamp: timestamp
         });
-
-        // Al primo click si apre la fase di risposta per il primo in coda
-        if (buzzerQueue.length === 1) {
-            gameState = 'ANSWERING';
-            currentAnsweringIndex = 0;
-        }
 
         io.emit('update_state', getGameStatePayload());
     });
@@ -220,7 +215,6 @@ io.on('connection', (socket) => {
         const currentQ = questions[currentQuestionIndex];
 
         if (chosenOption === currentQ.correct) {
-            // Chiunque indovina prende sempre 1 punto pieno
             let teamObj = teams.find(t => t.id === socket.id);
             if (teamObj) teamObj.score += 1.0;
 
@@ -237,7 +231,6 @@ io.on('connection', (socket) => {
         } else {
             eliminatedOptions.push(chosenOption);
 
-            // C'è un'altra squadra successiva in coda? Passa il turno a lei!
             if (currentAnsweringIndex + 1 < buzzerQueue.length) {
                 currentAnsweringIndex++;
                 const nextTeam = buzzerQueue[currentAnsweringIndex];
@@ -248,7 +241,6 @@ io.on('connection', (socket) => {
                 });
                 io.emit('update_state', getGameStatePayload());
             } else {
-                // Nessun'altra squadra in coda: la domanda si chiude senza mostrare la risposta
                 gameState = 'QUESTION_ENDED';
                 io.emit('answer_result', {
                     correct: false,
@@ -271,13 +263,44 @@ io.on('connection', (socket) => {
 
 async function startQuestion() {
     if (autoNextTimer) clearTimeout(autoNextTimer);
+    if (buzzerWindowTimer) clearTimeout(buzzerWindowTimer);
+
     await ensureQuestionTranslated(currentQuestionIndex);
 
-    gameState = 'QUESTION_OPEN';
+    gameState = 'BUZZER_WINDOW'; // Finestra aperta in cui tutti possono premere per 3 secondi
     buzzerQueue = [];
     currentAnsweringIndex = 0;
     eliminatedOptions = [];
     io.emit('update_state', getGameStatePayload());
+
+    // Dopo esattamente 3 secondi, chiudiamo la finestra di prenotazione, ordiniamo i click e passiamo al primo
+    buzzerWindowTimer = setTimeout(() => {
+        if (gameState !== 'BUZZER_WINDOW') return;
+
+        // Ordiniamo la coda in base al timestamp cronologico (dal più veloce al più lento)
+        buzzerQueue.sort((a, b) => a.timestamp - b.timestamp);
+
+        // Calcoliamo i ritardi relativi rispetto al primo in classifica
+        if (buzzerQueue.length > 0) {
+            const firstTime = buzzerQueue[0].timestamp;
+            buzzerQueue.forEach((b, idx) => {
+                b.delay = idx === 0 ? "0.000" : ((b.timestamp - firstTime) / 1000).toFixed(3);
+            });
+            gameState = 'ANSWERING';
+            currentAnsweringIndex = 0;
+        } else {
+            // Nessuno ha premuto in 3 secondi: saltiamo la domanda o passiamo oltre
+            gameState = 'QUESTION_ENDED';
+            io.emit('answer_result', {
+                correct: false,
+                teamName: "Nessuno",
+                message: "Tempo scaduto per le prenotazioni! Nessuno ha premuto."
+            });
+            scheduleNextQuestion();
+        }
+
+        io.emit('update_state', getGameStatePayload());
+    }, 3000);
 }
 
 function scheduleNextQuestion() {
