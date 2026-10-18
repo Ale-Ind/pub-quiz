@@ -55,12 +55,10 @@
                     <div id="opt-D" class="p-4 rounded-xl bg-slate-700 border border-slate-600 font-semibold text-lg flex flex-col"><div class="flex items-center"><span class="bg-indigo-600 w-8 h-8 rounded-lg flex items-center justify-center mr-3 font-bold">D</span> <span class="text-val-it">Opzione D</span></div><span class="text-xs text-slate-400 italic mt-1 pl-11 text-val-en">Opt D</span></div>
                 </div>
 
-                <div id="action-feedback" class="mt-6 text-center font-bold text-lg text-amber-300 min-h-[30px]"></div>
-
-                <div class="mt-6 flex justify-end">
-                    <button id="next-q-btn" onclick="nextQuestion()" class="hidden px-6 py-3 bg-amber-500 hover:bg-amber-600 text-slate-900 font-bold rounded-xl transition">
-                        PROSSIMA DOMANDA ➔
-                    </button>
+                <!-- Feedback con indicatore del countdown automatico -->
+                <div class="mt-6 text-center font-bold text-lg min-h-[40px]">
+                    <div id="action-feedback" class="text-amber-300"></div>
+                    <div id="countdown-timer" class="text-slate-400 text-sm mt-1 hidden">Prossima domanda tra <span id="countdown-sec" class="text-amber-400 font-bold">5</span> secondi...</div>
                 </div>
             </div>
 
@@ -103,12 +101,14 @@
         const qTextIt = document.getElementById('q-text-it');
         const qTextEn = document.getElementById('q-text-en');
         const actionFeedback = document.getElementById('action-feedback');
-        const nextQBtn = document.getElementById('next-q-btn');
+        const countdownTimer = document.getElementById('countdown-timer');
+        const countdownSec = document.getElementById('countdown-sec');
         const gameStatusBadge = document.getElementById('game-status-badge');
         const loadingNotice = document.getElementById('loading-notice');
 
         let globalIsReady = false;
         let globalTeamsCount = 0;
+        let countdownInterval = null;
 
         socket.on('update_state', (state) => updateUI(state));
         socket.on('update_teams', (teams) => {
@@ -139,10 +139,13 @@
                     }, 500);
                 }
             }
-            nextQBtn.classList.remove('hidden');
+            
+            // Avvia il conto alla rovescia visivo di 5 secondi
+            startCountdown(5);
         });
 
         socket.on('game_over', (data) => {
+            if (countdownInterval) clearInterval(countdownInterval);
             lobbyView.classList.add('hidden');
             gameView.classList.add('hidden');
             gameoverView.classList.remove('hidden');
@@ -156,12 +159,28 @@
         });
 
         function startGame() { socket.emit('start_game'); }
-        function nextQuestion() { nextQBtn.classList.add('hidden'); socket.emit('next_question'); }
         
         function resetGame() {
             if (confirm("Vuoi davvero interrompere la partita attuale e tornare alla Lobby?")) {
+                if (countdownInterval) clearInterval(countdownInterval);
                 socket.emit('reset_game');
             }
+        }
+
+        function startCountdown(seconds) {
+            if (countdownInterval) clearInterval(countdownInterval);
+            let timeLeft = seconds;
+            countdownSec.innerText = timeLeft;
+            countdownTimer.classList.remove('hidden');
+
+            countdownInterval = setInterval(() => {
+                timeLeft--;
+                countdownSec.innerText = timeLeft;
+                if (timeLeft <= 0) {
+                    clearInterval(countdownInterval);
+                    countdownTimer.classList.add('hidden');
+                }
+            }, 1000);
         }
 
         function checkStartButton() {
@@ -202,6 +221,7 @@
                 lobbyView.classList.remove('hidden');
                 gameView.classList.add('hidden');
                 gameoverView.classList.add('hidden');
+                if (countdownInterval) clearInterval(countdownInterval);
             } else if (state.gameState === 'GAME_OVER') {
                 lobbyView.classList.add('hidden');
                 gameView.classList.add('hidden');
@@ -210,6 +230,11 @@
                 lobbyView.classList.add('hidden');
                 gameoverView.classList.add('hidden');
                 gameView.classList.remove('hidden');
+            }
+
+            if (state.gameState === 'QUESTION_OPEN') {
+                countdownTimer.classList.add('hidden');
+                if (countdownInterval) clearInterval(countdownInterval);
             }
 
             if (state.currentQuestion) {
@@ -232,7 +257,7 @@
 
             if (state.buzzerQueue.length === 0) {
                 buzzerList.innerHTML = `<li class="text-slate-500 italic text-sm">In attesa...</li>`;
-                actionFeedback.innerText = "PRENOTATEVI!";
+                if (state.gameState === 'QUESTION_OPEN') actionFeedback.innerText = "PRENOTATEVI!";
             } else {
                 buzzerList.innerHTML = state.buzzerQueue.map((b, idx) => {
                     let badge = idx === 0 ? `<span class="bg-amber-500 text-slate-900 text-xs px-2 py-0.5 rounded font-black">1° RISPONDE</span>` :
@@ -253,9 +278,6 @@
                         `⚡ Tentativo di riserva per <span class="text-blue-400 font-bold">${currentTeam.teamName}</span> (2° tentativo - 0.5 pt)`;
                 }
             }
-
-            if (state.gameState === 'QUESTION_ENDED') nextQBtn.classList.remove('hidden');
-            else nextQBtn.classList.add('hidden');
         }
     </script>
 </body>
