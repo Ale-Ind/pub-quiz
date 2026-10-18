@@ -31,17 +31,15 @@ function decodeHTML(html) {
                .replace(/&rdquo;/g, '"');
 }
 
-// Funzione helper per creare pause tra le chiamate
 const delay = ms => new Promise(resolve => setTimeout(resolve, ms));
 
-// Traduzione sequenziale singola con gestione errori e pause anti-spam
+// Traduzione di una singola stringa protetta da micro-pausa
 async function translateText(text) {
     if (!text || text.trim() === "") return "";
     let cleanText = decodeHTML(text);
 
     try {
-        // Pausa di 300ms prima di ogni singola chiamata a Google
-        await delay(300);
+        await delay(200); // Micro-pausa invisibile
 
         const url = `https://translate.googleapis.com/translate_a/single?client=gtx&sl=en&tl=it&dt=t&q=${encodeURIComponent(cleanText)}`;
         const res = await fetch(url, {
@@ -50,10 +48,7 @@ async function translateText(text) {
             }
         });
 
-        if (!res.ok) {
-            console.error(`⚠️ Risposta Google non OK (${res.status}) per: "${cleanText.substring(0, 20)}..."`);
-            return cleanText;
-        }
+        if (!res.ok) return cleanText;
 
         const data = await res.json();
         if (data && Array.isArray(data[0])) {
@@ -63,19 +58,19 @@ async function translateText(text) {
             }
         }
     } catch (e) {
-        console.error("⚠️ Eccezione Google Translate:", e.message);
+        console.error("Errore traduzione:", e.message);
     }
     return cleanText;
 }
 
-// Caricamento e traduzione sequenziale controllata
-async function fetchAndTranslateQuestions() {
-    console.log("🔄 Avvio scaricamento e traduzione con Google Translate...");
+// Scarica le domande in inglese in modo istantaneo all'avvio
+async function fetchRawQuestions() {
+    console.log("🔄 Scaricamento rapido domande grezze...");
     isReadyToStart = false;
-    io.emit('loading_status', "Scaricamento e traduzione domande in corso... Attendere circa 10-15 secondi.");
+    io.emit('loading_status', "Caricamento domande in corso...");
 
     try {
-        const response = await fetch('https://opentdb.com/api.php?amount=15&type=multiple');
+        const response = await fetch('https://opentdb.com/api.php?amount=25&type=multiple');
         const data = await response.json();
         
         if (data.results && data.results.length > 0) {
@@ -89,14 +84,8 @@ async function fetchAndTranslateQuestions() {
                 let rawCorrectEn = decodeHTML(q.correct_answer);
                 let rawIncorrectsEn = q.incorrect_answers.map(ans => decodeHTML(ans));
 
-                // Traduciamo sequenzialmente categoria e domanda
-                let categoryIt = await translateText(rawCategoryEn);
-                let questionIt = await translateText(rawQuestionEn);
-                
                 let optionsEnList = [...rawIncorrectsEn, rawCorrectEn].sort(() => Math.random() - 0.5);
-                
                 let optionsEn = {};
-                let optionsIt = {};
                 const keys = ['A', 'B', 'C', 'D'];
 
                 optionsEnList.forEach((optEn, idx) => {
@@ -104,43 +93,56 @@ async function fetchAndTranslateQuestions() {
                 });
 
                 let finalCorrectKey = 'A';
-                // Traduciamo ogni opzione una per una con la pausa di sicurezza
-                for (let idx = 0; idx < optionsEnList.length; idx++) {
-                    let key = keys[idx];
-                    let translatedOpt = await translateText(optionsEnList[idx]);
-                    optionsIt[key] = translatedOpt;
-                    if (optionsEnList[idx] === rawCorrectEn) {
-                        finalCorrectKey = key;
+                optionsEnList.forEach((optEn, idx) => {
+                    if (optEn === rawCorrectEn) {
+                        finalCorrectKey = keys[idx];
                     }
-                }
+                });
 
                 loadedQuestions.push({
                     id: i + 1,
                     categoryEn: rawCategoryEn,
-                    categoryIt: categoryIt,
+                    categoryIt: null, // Verrà tradotto al volo
                     questionEn: rawQuestionEn,
-                    questionIt: questionIt,
+                    questionIt: null, // Verrà tradotto al volo
                     optionsEn: optionsEn,
-                    optionsIt: optionsIt,
-                    correct: finalCorrectKey
+                    optionsIt: null,  // Verrà tradotto al volo
+                    correct: finalCorrectKey,
+                    translated: false
                 });
-
-                console.log(`✓ Domanda ${i + 1}/${data.results.length} tradotta.`);
             }
 
             questions = loadedQuestions;
             isReadyToStart = true;
-            console.log(`✅ Tradotte e caricate con successo ${questions.length} domande!`);
+            console.log(`✅ ${questions.length} domande pronte in memoria (pronte per la traduzione on-demand)!`);
             io.emit('loading_status', "");
             io.emit('update_state', getGameStatePayload());
         }
     } catch (err) {
-        console.error("❌ Errore generale nel recupero domande:", err);
+        console.error("Errore nel recupero:", err);
         io.emit('loading_status', "Errore di caricamento. Ricarica la pagina.");
     }
 }
 
-fetchAndTranslateQuestions();
+fetchRawQuestions();
+
+// Funzione che traduce una domanda SOLO quando viene richiesta dal gioco
+async function ensureQuestionTranslated(index) {
+    let q = questions[index];
+    if (q.translated) return; // Se è già tradotta, salta
+
+    console.log(`🌐 Traduzione on-demand della domanda ${index + 1}...`);
+    
+    q.categoryIt = await translateText(q.categoryEn);
+    q.questionIt = await translateText(q.questionEn);
+
+    let optionsIt = {};
+    for (let key of Object.keys(q.optionsEn)) {
+        optionsIt[key] = await translateText(q.optionsEn[key]);
+    }
+    q.optionsIt = optionsIt;
+    q.translated = true;
+}
 
 io.on('connection', (socket) => {
     console.log(`Dispositivo connesso: ${socket.id}`);
@@ -169,10 +171,10 @@ io.on('connection', (socket) => {
         io.emit('update_state', getGameStatePayload());
     });
 
-    socket.on('start_game', () => {
+    socket.on('start_game', async () => {
         if (!isReadyToStart || teams.length === 0 || questions.length === 0) return;
         currentQuestionIndex = 0;
-        startQuestion();
+        await startQuestion();
     });
 
     socket.on('reset_game', () => {
@@ -270,8 +272,13 @@ io.on('connection', (socket) => {
     });
 });
 
-function startQuestion() {
+// Apre la domanda traducendola al volo se necessario
+async function startQuestion() {
     if (autoNextTimer) clearTimeout(autoNextTimer);
+    
+    // Traduce la domanda corrente prima di aprirla
+    await ensureQuestionTranslated(currentQuestionIndex);
+
     gameState = 'QUESTION_OPEN';
     buzzerQueue = [];
     currentAnsweringIndex = 0;
@@ -282,10 +289,10 @@ function startQuestion() {
 function scheduleNextQuestion() {
     if (autoNextTimer) clearTimeout(autoNextTimer);
     
-    autoNextTimer = setTimeout(() => {
+    autoNextTimer = setTimeout(async () => {
         currentQuestionIndex++;
         if (currentQuestionIndex < questions.length) {
-            startQuestion();
+            await startQuestion();
         } else {
             gameState = 'GAME_OVER';
             io.emit('game_over', { teams });
