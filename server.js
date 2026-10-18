@@ -30,11 +30,19 @@ function decodeHTML(html) {
                .replace(/&rdquo;/g, '"');
 }
 
+// Funzione di traduzione con pausa di sicurezza anti-blocco IP
 async function translateText(text) {
     if (!text || text.trim() === "") return "";
     try {
+        // Pausa di 300ms per evitare il ban di Google per troppe richieste rapide
+        await new Promise(resolve => setTimeout(resolve, 300));
+
         const url = `https://translate.googleapis.com/translate_a/single?client=gtx&sl=en&tl=it&dt=t&q=${encodeURIComponent(text)}`;
-        const res = await fetch(url);
+        const res = await fetch(url, {
+            headers: {
+                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
+            }
+        });
         const data = await res.json();
         
         if (data && data[0]) {
@@ -44,7 +52,7 @@ async function translateText(text) {
     } catch (e) {
         console.error("Errore di traduzione con Google Translate:", e);
     }
-    return text;
+    return text; // Fallback al testo originale in caso di errore di rete
 }
 
 async function fetchAndTranslateQuestions() {
@@ -53,7 +61,8 @@ async function fetchAndTranslateQuestions() {
     io.emit('loading_status', "Scaricamento e traduzione domande in corso... Attendere.");
 
     try {
-        const response = await fetch('https://opentdb.com/api.php?amount=30&type=multiple');
+        // Scarichiamo 15 domande per renderlo velocissimo e sicurissimo contro i blocchi
+        const response = await fetch('https://opentdb.com/api.php?amount=15&type=multiple');
         const data = await response.json();
         
         if (data.results && data.results.length > 0) {
@@ -67,11 +76,10 @@ async function fetchAndTranslateQuestions() {
                 let rawCorrectEn = decodeHTML(q.correct_answer);
                 let rawIncorrectsEn = q.incorrect_answers.map(ans => decodeHTML(ans));
 
-                // Traduce in italiano
+                // Traduce in italiano in modo scaglionato
                 let questionIt = await translateText(rawQuestionEn);
                 let categoryIt = await translateText(rawCategoryEn);
                 
-                // Mescola le opzioni in inglese
                 let optionsEnList = [...rawIncorrectsEn, rawCorrectEn].sort(() => Math.random() - 0.5);
                 
                 let optionsEn = {};
